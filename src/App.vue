@@ -6,7 +6,7 @@ import PdfViewer from './components/PdfViewer.vue'
 import ElementList from './components/ElementList.vue'
 
 const mainRef = ref<HTMLElement | null>(null)
-const { loadPdf, pdfDoc, textItems, loading, error } = usePdf()
+const { loadPdf, pdfDoc, elements, loading, error } = usePdf()
 
 const highlightedId = ref<string | null>(null)
 const selectedId = ref<string | null>(null)
@@ -76,7 +76,7 @@ const onSelect = (id: string) => {
 
       <ElementList 
         class="flex-1"
-        :items="textItems" 
+        :items="elements" 
         :highlighted-id="highlightedId"
         :selected-id="selectedId"
         @hover="onHover"
@@ -88,6 +88,7 @@ const onSelect = (id: string) => {
     <section class="flex-1 overflow-hidden relative bg-gray-900">
       <PdfViewer 
         :pdf-doc="pdfDoc"
+        :elements="elements"
         :highlighted-id="highlightedId"
         :selected-id="selectedId"
         @hover="onHover"
