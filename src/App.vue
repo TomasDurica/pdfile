@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useDropZone, useFileDialog } from '@vueuse/core'
 import { usePdf } from './composables/usePdf'
+import { detectTables, type DetectedTable } from './composables/useTableDetection'
 import PdfViewer from './components/PdfViewer.vue'
 import ElementList from './components/ElementList.vue'
 
@@ -11,6 +12,13 @@ const { loadPdf, pdfDoc, elements, loading, error } = usePdf()
 const highlightedId = ref<string | null>(null)
 const selectedId = ref<string | null>(null)
 const showAllOverlays = ref(false)
+const tables = ref<DetectedTable[]>([])
+
+// Re-detect tables whenever elements change
+watch(elements, (els) => {
+  tables.value = detectTables(els)
+  console.log(`Detected ${tables.value.length} tables`)
+}, { immediate: true })
 
 const onDrop = (files: File[] | null) => {
   if (files && files.length > 0 && files[0].type === 'application/pdf') {
@@ -78,6 +86,7 @@ const onSelect = (id: string) => {
       <ElementList 
         class="flex-1"
         :items="elements" 
+        :tables="tables"
         :highlighted-id="highlightedId"
         :selected-id="selectedId"
         :show-all-overlays="showAllOverlays"
@@ -92,6 +101,7 @@ const onSelect = (id: string) => {
       <PdfViewer 
         :pdf-doc="pdfDoc"
         :elements="elements"
+        :tables="tables"
         :highlighted-id="highlightedId"
         :selected-id="selectedId"
         :show-all-overlays="showAllOverlays"

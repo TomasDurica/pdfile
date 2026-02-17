@@ -2,10 +2,12 @@
 import { ref, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PdfElement } from '../composables/usePdf'
+import type { DetectedTable } from '../composables/useTableDetection'
 
 const props = defineProps<{
   pdfDoc: pdfjsLib.PDFDocumentProxy | null
   elements: PdfElement[]
+  tables: DetectedTable[]
   highlightedId: string | null
   selectedId: string | null
   showAllOverlays: boolean
@@ -20,6 +22,9 @@ const container = ref<HTMLElement | null>(null)
 const itemMap = new Map<string, HTMLElement>()
 const SCALE = 1.5
 
+// ── Viewport cache (per page) ────────────────────────────────────────
+const viewportCache = new Map<number, any>()
+
 // ── Render one page ──────────────────────────────────────────────────
 
 async function renderPage(pageNum: number) {
@@ -27,11 +32,13 @@ async function renderPage(pageNum: number) {
 
   const page = await props.pdfDoc.getPage(pageNum)
   const viewport = page.getViewport({ scale: SCALE })
+  viewportCache.set(pageNum, viewport)
 
   // Page wrapper
   const wrapper = document.createElement('div')
   wrapper.style.cssText = `position:relative;margin:0 auto 20px;width:${viewport.width}px;height:${viewport.height}px`
   wrapper.className = 'pdf-page shadow-lg bg-white'
+  wrapper.dataset.page = String(pageNum)
   container.value.appendChild(wrapper)
 
   // Canvas
@@ -41,14 +48,20 @@ async function renderPage(pageNum: number) {
   wrapper.appendChild(canvas)
   await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise
 
-  // Overlay layer (sits on top of canvas, captures mouse events)
+  // Overlay layer
   const overlayLayer = document.createElement('div')
   overlayLayer.style.cssText = 'position:absolute;inset:0;overflow:hidden'
+  overlayLayer.dataset.layer = 'elements'
   wrapper.appendChild(overlayLayer)
 
-  // Create one overlay div per element on this page
-  const pageEls = props.elements.filter(el => el.page === pageNum)
+  // Table overlay layer (on top)
+  const tableLayer = document.createElement('div')
+  tableLayer.style.cssText = 'position:absolute;inset:0;overflow:hidden;pointer-events:none'
+  tableLayer.dataset.layer = 'tables'
+  wrapper.appendChild(tableLayer)
 
+  // Create element overlays
+  const pageEls = props.elements.filter(el => el.page === pageNum)
   for (const item of pageEls) {
     const box = toViewportBox(item, viewport)
     if (!box) continue
@@ -63,8 +76,6 @@ async function renderPage(pageNum: number) {
       cursor:pointer;
       transition:background .05s;
     `
-
-    // Type-specific styling
     div.classList.add('overlay-base', `overlay-${item.type}`)
 
     div.addEventListener('mouseenter', () => emit('hover', item.id))
@@ -74,6 +85,74 @@ async function renderPage(pageNum: number) {
     overlayLayer.appendChild(div)
     itemMap.set(item.id, div)
   }
+
+  // Create table overlays
+  const pageTables = props.tables.filter(t => t.page === pageNum)
+  for (const table of pageTables) {
+    renderTableOverlay(table, viewport, tableLayer)
+  }
+}
+
+// ── Table overlay rendering ──────────────────────────────────────────
+
+function renderTableOverlay(table: DetectedTable, viewport: any, layer: HTMLElement) {
+  // Table bounding box
+  const p1: [number, number] = [table.x, table.y]
+  const p2: [number, number] = [table.x + table.width, table.y + table.height]
+  pdfjsLib.Util.applyTransform(p1, viewport.transform)
+  pdfjsLib.Util.applyTransform(p2, viewport.transform)
+
+  const tx = Math.min(p1[0], p2[0])
+  const ty = Math.min(p1[1], p2[1])
+  const tw = Math.abs(p2[0] - p1[0])
+  const th = Math.abs(p2[1] - p1[1])
+
+  // Table outline
+  const tableDiv = document.createElement('div')
+  tableDiv.dataset.id = table.id
+  tableDiv.style.cssText = `
+    position:absolute;
+    left:${tx}px;top:${ty}px;
+    width:${tw}px;height:${th}px;
+    pointer-events:auto;
+    cursor:pointer;
+    transition:background .1s;
+  `
+  tableDiv.classList.add('overlay-base', 'overlay-table')
+
+  tableDiv.addEventListener('mouseenter', () => emit('hover', table.id))
+  tableDiv.addEventListener('mouseleave', () => emit('hover', null))
+  tableDiv.addEventListener('click', (ev) => { ev.stopPropagation(); emit('select', table.id) })
+
+  // Cell grid lines
+  for (const row of table.cells) {
+    for (const cell of row) {
+      const c1: [number, number] = [cell.x, cell.y]
+      const c2: [number, number] = [cell.x + cell.width, cell.y + cell.height]
+      pdfjsLib.Util.applyTransform(c1, viewport.transform)
+      pdfjsLib.Util.applyTransform(c2, viewport.transform)
+
+      const cx = Math.min(c1[0], c2[0]) - tx
+      const cy = Math.min(c1[1], c2[1]) - ty
+      const cw = Math.abs(c2[0] - c1[0])
+      const ch = Math.abs(c2[1] - c1[1])
+
+      const cellDiv = document.createElement('div')
+      cellDiv.style.cssText = `
+        position:absolute;
+        left:${cx}px;top:${cy}px;
+        width:${cw}px;height:${ch}px;
+        border:1px solid rgba(168, 85, 247, 0.3);
+        box-sizing:border-box;
+        pointer-events:none;
+      `
+      cellDiv.classList.add('table-cell-overlay')
+      tableDiv.appendChild(cellDiv)
+    }
+  }
+
+  layer.appendChild(tableDiv)
+  itemMap.set(table.id, tableDiv)
 }
 
 // ── Convert a PdfElement to pixel coordinates in the viewport ────────
@@ -110,22 +189,27 @@ function toViewportBox(item: PdfElement, viewport: any) {
   return { x, y, w, h }
 }
 
-// ── Full re-render when doc or elements change ──────────────────────
+// ── Full re-render ──────────────────────────────────────────────────
 
 async function renderAll() {
   if (!container.value) return
   container.value.innerHTML = ''
   itemMap.clear()
+  viewportCache.clear()
   if (!props.pdfDoc) return
   for (let i = 1; i <= props.pdfDoc.numPages; i++) {
     await renderPage(i)
   }
-  // Apply "show all" state after render
   applyShowAll(props.showAllOverlays)
 }
 
 watch(() => props.pdfDoc, renderAll)
 watch(() => props.elements, renderAll)
+watch(() => props.tables, () => {
+  // Re-render table overlays only (tables change after elements)
+  // For simplicity, just re-render everything
+  renderAll()
+})
 
 // ── "Show All" toggle ────────────────────────────────────────────────
 
@@ -190,16 +274,25 @@ watch(() => props.selectedId, (newId, oldId) => {
 .overlay-text:hover  { background: rgba(234, 179, 8, 0.2); }
 .overlay-line:hover  { background: rgba(59, 130, 246, 0.3); }
 .overlay-rect:hover  { background: rgba(34, 197, 94, 0.25); }
+.overlay-table:hover { background: rgba(168, 85, 247, 0.15); }
 
 /* "Show All" mode — type-based tint always visible */
 .overlay-text.show-all { background: rgba(234, 179, 8, 0.15);  outline: 1px solid rgba(234, 179, 8, 0.3); }
 .overlay-line.show-all { background: rgba(59, 130, 246, 0.20); outline: 1px solid rgba(59, 130, 246, 0.5); }
 .overlay-rect.show-all { background: rgba(34, 197, 94, 0.15);  outline: 1px solid rgba(34, 197, 94, 0.4); }
+.overlay-table.show-all {
+  background: rgba(168, 85, 247, 0.08);
+  outline: 2px solid rgba(168, 85, 247, 0.5);
+}
+.overlay-table.show-all .table-cell-overlay {
+  border-color: rgba(168, 85, 247, 0.4) !important;
+}
 
 /* Hover intensifies in show-all mode */
 .overlay-text.show-all:hover { background: rgba(234, 179, 8, 0.35); }
 .overlay-line.show-all:hover { background: rgba(59, 130, 246, 0.45); }
 .overlay-rect.show-all:hover { background: rgba(34, 197, 94, 0.40); }
+.overlay-table.show-all:hover { background: rgba(168, 85, 247, 0.25); }
 
 /* Individual highlight (from list hover) */
 .is-highlighted { background: rgba(96, 165, 250, 0.35) !important; outline: 1px solid rgba(96, 165, 250, 0.6) !important; }
@@ -208,5 +301,13 @@ watch(() => props.selectedId, (newId, oldId) => {
 .is-selected {
   background: rgba(34, 197, 94, 0.35) !important;
   outline: 2px solid rgba(74, 222, 128, 0.7) !important;
+}
+
+/* Selected table — show cell grid */
+.overlay-table.is-selected .table-cell-overlay {
+  border-color: rgba(168, 85, 247, 0.6) !important;
+}
+.overlay-table.is-highlighted .table-cell-overlay {
+  border-color: rgba(168, 85, 247, 0.5) !important;
 }
 </style>
