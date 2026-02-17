@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineProps, defineEmits } from 'vue'
+import { defineProps, defineEmits, watch, nextTick } from 'vue'
 
 interface TextItem {
   str: string
@@ -25,6 +25,16 @@ const onHover = (id: string | null) => {
 const onSelect = (id: string) => {
   emit('select', id)
 }
+
+watch(() => props.selectedId, async (newId: string | null) => {
+  if (newId) {
+    await nextTick()
+    const el = document.getElementById(`list-item-${newId}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
+})
 </script>
 
 <template>

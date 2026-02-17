@@ -99,19 +99,5 @@ const onSelect = (id: string) => {
 </template>
 
 <style>
-/* Global scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #111827; 
-}
-::-webkit-scrollbar-thumb {
-  background: #374151; 
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #4b5563; 
-}
+/* Custom scrollbar removed for native feel */
 </style>

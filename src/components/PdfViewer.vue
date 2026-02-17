@@ -169,7 +169,6 @@ watch(() => props.highlightedId, (newId: string | null, oldId: string | null) =>
         const el = itemMap.get(newId)
         if (el) {
             el.classList.add('bg-blue-500/40')
-             el.scrollIntoView({ behavior: 'smooth', block: 'center' })
         }
     }
 })
@@ -190,7 +189,7 @@ watch(() => props.selectedId, (newId: string | null, oldId: string | null) => {
 </script>
 
 <template>
-  <div ref="container" class="pdf-viewer bg-gray-500/20 p-8 min-h-full overflow-y-auto">
+  <div ref="container" class="pdf-viewer bg-gray-500/20 p-8 h-full w-full overflow-y-auto">
     <div v-if="!pdfDoc" class="flex flex-col items-center justify-center h-full text-gray-500">
       <div class="i-carbon-document-pdf text-6xl mb-4" />
       <p class="text-xl">Drop a PDF file here to start exploring</p>
