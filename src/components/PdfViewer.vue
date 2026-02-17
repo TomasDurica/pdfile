@@ -8,6 +8,7 @@ const props = defineProps<{
   elements: PdfElement[]
   highlightedId: string | null
   selectedId: string | null
+  showAllOverlays: boolean
 }>()
 
 const emit = defineEmits<{
@@ -54,6 +55,7 @@ async function renderPage(pageNum: number) {
 
     const div = document.createElement('div')
     div.dataset.id = item.id
+    div.dataset.type = item.type
     div.style.cssText = `
       position:absolute;
       left:${box.x}px;top:${box.y}px;
@@ -62,11 +64,8 @@ async function renderPage(pageNum: number) {
       transition:background .05s;
     `
 
-    // Type-specific hover colour
-    const hoverClass = item.type === 'text' ? 'overlay-text'
-                     : item.type === 'line' ? 'overlay-line'
-                     : 'overlay-rect'
-    div.classList.add('overlay-base', hoverClass)
+    // Type-specific styling
+    div.classList.add('overlay-base', `overlay-${item.type}`)
 
     div.addEventListener('mouseenter', () => emit('hover', item.id))
     div.addEventListener('mouseleave', () => emit('hover', null))
@@ -83,24 +82,17 @@ function toViewportBox(item: PdfElement, viewport: any) {
   let x: number, y: number, w: number, h: number
 
   if (item.type === 'text' && item.transform) {
-    // Compose the element transform with the viewport transform.
-    // viewport.transform maps PDF user-space → CSS pixels (top-left origin).
     const tx = pdfjsLib.Util.transform(viewport.transform, item.transform)
-
-    // tx = [a, b, c, d, e, f]  where (e,f) is the text origin (baseline-left)
-    // Font height in CSS-px:
     const fontH = Math.hypot(tx[2], tx[3])
     const realH = item.height > 0 ? item.height * viewport.scale : fontH
 
     x = tx[4]
-    y = tx[5] - realH        // move from baseline up to top-left
+    y = tx[5] - realH
     w = item.width * viewport.scale
     h = realH
 
-    // Skip invisible / whitespace-only
     if (w < 1 && h < 1) return null
   } else {
-    // Lines & rects live in PDF user-space → transform both corners
     const p1: [number, number] = [item.x, item.y]
     const p2: [number, number] = [item.x + item.width, item.y + item.height]
     pdfjsLib.Util.applyTransform(p1, viewport.transform)
@@ -111,7 +103,6 @@ function toViewportBox(item: PdfElement, viewport: any) {
     w = Math.abs(p2[0] - p1[0])
     h = Math.abs(p2[1] - p1[1])
 
-    // Ensure a minimum click-target size
     if (w < 3) { x -= 1.5; w = 3 }
     if (h < 3) { y -= 1.5; h = 3 }
   }
@@ -129,10 +120,28 @@ async function renderAll() {
   for (let i = 1; i <= props.pdfDoc.numPages; i++) {
     await renderPage(i)
   }
+  // Apply "show all" state after render
+  applyShowAll(props.showAllOverlays)
 }
 
 watch(() => props.pdfDoc, renderAll)
 watch(() => props.elements, renderAll)
+
+// ── "Show All" toggle ────────────────────────────────────────────────
+
+function applyShowAll(show: boolean) {
+  itemMap.forEach((el) => {
+    if (show) {
+      el.classList.add('show-all')
+    } else {
+      el.classList.remove('show-all')
+    }
+  })
+}
+
+watch(() => props.showAllOverlays, (show) => {
+  applyShowAll(show)
+})
 
 // ── Highlight / select watchers ──────────────────────────────────────
 
@@ -176,13 +185,28 @@ watch(() => props.selectedId, (newId, oldId) => {
 .overlay-base {
   box-sizing: border-box;
 }
-.overlay-text:hover  { background: rgba(234, 179, 8, 0.2); }   /* yellow */
-.overlay-line:hover  { background: rgba(59, 130, 246, 0.3); }  /* blue   */
-.overlay-rect:hover  { background: rgba(34, 197, 94, 0.25); }  /* green  */
 
-.is-highlighted { background: rgba(96, 165, 250, 0.35) !important; }
+/* Hover colors per type */
+.overlay-text:hover  { background: rgba(234, 179, 8, 0.2); }
+.overlay-line:hover  { background: rgba(59, 130, 246, 0.3); }
+.overlay-rect:hover  { background: rgba(34, 197, 94, 0.25); }
+
+/* "Show All" mode — type-based tint always visible */
+.overlay-text.show-all { background: rgba(234, 179, 8, 0.15);  outline: 1px solid rgba(234, 179, 8, 0.3); }
+.overlay-line.show-all { background: rgba(59, 130, 246, 0.20); outline: 1px solid rgba(59, 130, 246, 0.5); }
+.overlay-rect.show-all { background: rgba(34, 197, 94, 0.15);  outline: 1px solid rgba(34, 197, 94, 0.4); }
+
+/* Hover intensifies in show-all mode */
+.overlay-text.show-all:hover { background: rgba(234, 179, 8, 0.35); }
+.overlay-line.show-all:hover { background: rgba(59, 130, 246, 0.45); }
+.overlay-rect.show-all:hover { background: rgba(34, 197, 94, 0.40); }
+
+/* Individual highlight (from list hover) */
+.is-highlighted { background: rgba(96, 165, 250, 0.35) !important; outline: 1px solid rgba(96, 165, 250, 0.6) !important; }
+
+/* Selected element */
 .is-selected {
   background: rgba(34, 197, 94, 0.35) !important;
-  outline: 2px solid rgba(74, 222, 128, 0.7);
+  outline: 2px solid rgba(74, 222, 128, 0.7) !important;
 }
 </style>

@@ -10,6 +10,7 @@ const { loadPdf, pdfDoc, elements, loading, error } = usePdf()
 
 const highlightedId = ref<string | null>(null)
 const selectedId = ref<string | null>(null)
+const showAllOverlays = ref(false)
 
 const onDrop = (files: File[] | null) => {
   if (files && files.length > 0 && files[0].type === 'application/pdf') {
@@ -79,8 +80,10 @@ const onSelect = (id: string) => {
         :items="elements" 
         :highlighted-id="highlightedId"
         :selected-id="selectedId"
+        :show-all-overlays="showAllOverlays"
         @hover="onHover"
         @select="onSelect"
+        @update:show-all-overlays="showAllOverlays = $event"
       />
     </aside>
 
@@ -91,6 +94,7 @@ const onSelect = (id: string) => {
         :elements="elements"
         :highlighted-id="highlightedId"
         :selected-id="selectedId"
+        :show-all-overlays="showAllOverlays"
         @hover="onHover"
         @select="onSelect"
       />
