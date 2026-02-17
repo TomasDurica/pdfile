@@ -29,9 +29,8 @@ export interface PdfElement {
 
 const OPS_MOVE_TO      = 13
 const OPS_LINE_TO      = 14
-const OPS_CURVE_TO     = 15
-const OPS_CURVE_TO_2   = 16
-const OPS_CURVE_TO_3   = 17
+// PathOps sub-op codes used inside constructPath (different from main OPS!)
+// 0=moveTo, 1=lineTo, 2=cubicTo(6), 3=cubicTo2(4), 4=close, 5=rect(4)
 const OPS_RECTANGLE    = 19
 const OPS_CONSTRUCT_PATH = 91
 
@@ -91,6 +90,7 @@ export function usePdf() {
         let cx = 0
         let cy = 0
 
+
         for (let j = 0; j < fnArray.length; j++) {
           const fn = fnArray[j]
           const args = argsArray[j]
@@ -106,42 +106,58 @@ export function usePdf() {
             addRect(all, p, `p${p}-r${j}`, args[0], args[1], args[2], args[3])
           }
           else if (fn === OPS_CONSTRUCT_PATH) {
-            // args structure (pdfjs v5): [fillRule, [opsTypedArray], valsTypedArray]
-            // The ops array is wrapped in an extra array.
-            let pathOps: ArrayLike<number>
-            let pathVals: ArrayLike<number>
+            // pdfjs v5 constructPath format:
+            //   args = [fillRule, [Float32Array], Float32Array(bbox)]
+            // The Float32Array contains ops and coords INTERLEAVED.
+            // IMPORTANT: sub-ops use PathOps enum, NOT the main OPS constants!
+            //   PathOps: 0=moveTo, 1=lineTo, 2=cubicTo(6), 3=cubicTo2(4), 4=close, 5=rect(4)
 
-            if (Array.isArray(args) && args.length >= 3) {
+            const PATH_MOVE = 0, PATH_LINE = 1, PATH_CUBIC = 2
+            const PATH_CUBIC2 = 3, PATH_CLOSE = 4, PATH_RECT = 5
+
+            let data: ArrayLike<number> | null = null
+
+            if (Array.isArray(args) && args.length >= 2) {
               const rawOps = args[1]
-              pathOps  = Array.isArray(rawOps) && rawOps.length > 0 ? rawOps[0] : rawOps
-              pathVals = args[2]
-            } else if (Array.isArray(args) && args.length === 2) {
-              // Alternate format: [opsArray, valsArray]
-              pathOps  = args[0]
-              pathVals = args[1]
-            } else {
-              continue
+              if (Array.isArray(rawOps) && rawOps.length > 0) {
+                data = rawOps[0]
+              } else if (rawOps && rawOps.length > 0) {
+                data = rawOps
+              }
             }
 
-            let px = 0, py = 0, vi = 0
-            for (let k = 0; k < pathOps.length; k++) {
-              const op = pathOps[k]
-              if (op === OPS_MOVE_TO) {
-                px = pathVals[vi++]; py = pathVals[vi++]
-              } else if (op === OPS_LINE_TO) {
-                const lx = pathVals[vi++], ly = pathVals[vi++]
-                addLine(all, p, `p${p}-cp${j}-${k}`, px, py, lx, ly)
-                px = lx; py = ly
-              } else if (op === OPS_RECTANGLE) {
-                const rx = pathVals[vi++], ry = pathVals[vi++]
-                const rw = pathVals[vi++], rh = pathVals[vi++]
-                addRect(all, p, `p${p}-cpr${j}-${k}`, rx, ry, rw, rh)
-              } else if (op === OPS_CURVE_TO) {
-                vi += 6
-              } else if (op === OPS_CURVE_TO_2 || op === OPS_CURVE_TO_3) {
-                vi += 4
+            if (!data || data.length === 0) continue
+
+            let idx = 0, px = 0, py = 0
+            while (idx < data.length) {
+              const op = data[idx++]
+
+              if (op === PATH_MOVE) {
+                px = data[idx++]; py = data[idx++]
               }
-              // closePath (18) and others consume 0 extra values
+              else if (op === PATH_LINE) {
+                const lx = data[idx++], ly = data[idx++]
+                addLine(all, p, `p${p}-cp${j}-${idx}`, px, py, lx, ly)
+                px = lx; py = ly
+              }
+              else if (op === PATH_RECT) {
+                const rx = data[idx++], ry = data[idx++]
+                const rw = data[idx++], rh = data[idx++]
+                addRect(all, p, `p${p}-cpr${j}-${idx}`, rx, ry, rw, rh)
+              }
+              else if (op === PATH_CUBIC) {
+                idx += 6  // skip 6 control-point coords
+              }
+              else if (op === PATH_CUBIC2) {
+                idx += 4
+              }
+              else if (op === PATH_CLOSE) {
+                // no coords consumed
+              }
+              else {
+                // Truly unknown sub-op — break to avoid infinite loop
+                break
+              }
             }
           }
           // All other ops (save/restore/setFont/showText/etc.) are irrelevant for geometry
