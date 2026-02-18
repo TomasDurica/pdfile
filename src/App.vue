@@ -50,6 +50,8 @@ const onSelect = (id: string) => {
   selectedId.value = id
 }
 
+const activeTab = ref<'elements' | 'tables'>('elements')
+
 </script>
 
 <template>
@@ -83,7 +85,8 @@ const onSelect = (id: string) => {
         {{ error }}
       </div>
 
-      <ElementList 
+      <ElementList
+        v-model="activeTab" 
         class="flex-1"
         :items="elements" 
         :tables="tables"
@@ -105,6 +108,7 @@ const onSelect = (id: string) => {
         :highlighted-id="highlightedId"
         :selected-id="selectedId"
         :show-all-overlays="showAllOverlays"
+        :active="activeTab"
         @hover="onHover"
         @select="onSelect"
       />

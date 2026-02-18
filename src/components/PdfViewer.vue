@@ -11,6 +11,7 @@ const props = defineProps<{
   highlightedId: string | null
   selectedId: string | null
   showAllOverlays: boolean
+  active: 'elements' | 'tables'
 }>()
 
 const emit = defineEmits<{
@@ -23,31 +24,33 @@ const itemMap = new Map<string, HTMLElement>()
 const SCALE = 1.5
 
 // ── Viewport cache (per page) ────────────────────────────────────────
-const viewportCache = new Map<number, any>()
+let currentRenderId = 0
 
 // ── Render one page ──────────────────────────────────────────────────
 
-async function renderPage(pageNum: number) {
+async function renderPage(pageNum: number, renderId: number) {
   if (!props.pdfDoc || !container.value) return
 
   const page = await props.pdfDoc.getPage(pageNum)
   const viewport = page.getViewport({ scale: SCALE })
-  viewportCache.set(pageNum, viewport)
+  const canvas = document.createElement('canvas')
+  canvas.width = viewport.width
+  canvas.height = viewport.height
+  await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise
+
+  if (renderId !== currentRenderId) return
 
   // Page wrapper
   const wrapper = document.createElement('div')
   wrapper.style.cssText = `position:relative;margin:0 auto 20px;width:${viewport.width}px;height:${viewport.height}px`
   wrapper.className = 'pdf-page shadow-lg bg-white'
   wrapper.dataset.page = String(pageNum)
+  wrapper.dataset.renderId = String(renderId)
   container.value.appendChild(wrapper)
 
   // Canvas
-  const canvas = document.createElement('canvas')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
   wrapper.appendChild(canvas)
-  await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise
-
+  
   // Overlay layer
   const overlayLayer = document.createElement('div')
   overlayLayer.style.cssText = 'position:absolute;inset:0;overflow:hidden'
@@ -78,9 +81,9 @@ async function renderPage(pageNum: number) {
     `
     div.classList.add('overlay-base', `overlay-${item.type}`)
 
-    div.addEventListener('mouseenter', () => emit('hover', item.id))
-    div.addEventListener('mouseleave', () => emit('hover', null))
-    div.addEventListener('click', (ev) => { ev.stopPropagation(); emit('select', item.id) })
+    div.addEventListener('mouseenter', () => {if (props.active === 'elements') emit('hover', item.id)})
+    div.addEventListener('mouseleave', () => {if (props.active === 'elements') emit('hover', null)})
+    div.addEventListener('click', (ev) => { if (props.active === 'elements') { ev.stopPropagation(); emit('select', item.id) } })
 
     overlayLayer.appendChild(div)
     itemMap.set(item.id, div)
@@ -120,9 +123,9 @@ function renderTableOverlay(table: DetectedTable, viewport: any, layer: HTMLElem
   `
   tableDiv.classList.add('overlay-base', 'overlay-table')
 
-  tableDiv.addEventListener('mouseenter', () => emit('hover', table.id))
-  tableDiv.addEventListener('mouseleave', () => emit('hover', null))
-  tableDiv.addEventListener('click', (ev) => { ev.stopPropagation(); emit('select', table.id) })
+  tableDiv.addEventListener('mouseenter', () => {if (props.active === 'tables') emit('hover', table.id)})
+  tableDiv.addEventListener('mouseleave', () => {if (props.active === 'tables') emit('hover', null)})
+  tableDiv.addEventListener('click', (ev) => { if (props.active === 'tables') { ev.stopPropagation(); emit('select', table.id) } })
 
   // Cell grid lines
   for (const row of table.cells) {
@@ -192,13 +195,14 @@ function toViewportBox(item: PdfElement, viewport: any) {
 // ── Full re-render ──────────────────────────────────────────────────
 
 async function renderAll() {
+  currentRenderId += 1
+  const renderId = currentRenderId
   if (!container.value) return
   container.value.innerHTML = ''
   itemMap.clear()
-  viewportCache.clear()
   if (!props.pdfDoc) return
   for (let i = 1; i <= props.pdfDoc.numPages; i++) {
-    await renderPage(i)
+    await renderPage(i, renderId)
   }
   applyShowAll(props.showAllOverlays)
 }
@@ -256,7 +260,7 @@ watch(() => props.selectedId, (newId, oldId) => {
 </script>
 
 <template>
-  <div ref="container" class="bg-gray-500/20 p-8 h-full w-full overflow-y-auto">
+  <div ref="container" class="bg-gray-500/20 p-8 h-full w-full overflow-y-auto" :class="`highlight-${active}`">
     <div v-if="!pdfDoc" class="flex flex-col items-center justify-center h-full text-gray-500">
       <div class="i-carbon-document-pdf text-6xl mb-4" />
       <p class="text-xl">Drop a PDF file here to start exploring</p>
@@ -270,11 +274,21 @@ watch(() => props.selectedId, (newId, oldId) => {
   box-sizing: border-box;
 }
 
+.highlight-elements {
+  .overlay-text:hover  { background: rgba(234, 179, 8, 0.2); }
+  .overlay-line:hover  { background: rgba(59, 130, 246, 0.3); }
+  .overlay-rect:hover  { background: rgba(34, 197, 94, 0.25); }
+  .overlay-table { display: none; }
+}
+
+.highlight-tables {
+  .overlay-table:hover { background: rgba(168, 85, 247, 0.15); }
+  .overlay-text { display: none; }
+  .overlay-line { display: none; }
+  .overlay-rect { display: none; }
+}
+
 /* Hover colors per type */
-.overlay-text:hover  { background: rgba(234, 179, 8, 0.2); }
-.overlay-line:hover  { background: rgba(59, 130, 246, 0.3); }
-.overlay-rect:hover  { background: rgba(34, 197, 94, 0.25); }
-.overlay-table:hover { background: rgba(168, 85, 247, 0.15); }
 
 /* "Show All" mode — type-based tint always visible */
 .overlay-text.show-all { background: rgba(234, 179, 8, 0.15);  outline: 1px solid rgba(234, 179, 8, 0.3); }

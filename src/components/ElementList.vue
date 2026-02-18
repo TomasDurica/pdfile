@@ -3,6 +3,8 @@ import { watch, nextTick, computed, ref } from 'vue'
 import type { PdfElement } from '../composables/usePdf'
 import type { DetectedTable } from '../composables/useTableDetection'
 
+const activeTab = defineModel<"elements" | "tables">()
+
 const props = defineProps<{
   items: PdfElement[]
   tables: DetectedTable[]
@@ -17,7 +19,7 @@ const emit = defineEmits<{
   (e: 'update:showAllOverlays', value: boolean): void
 }>()
 
-const activeTab = ref<'elements' | 'tables'>('elements')
+
 const collapsedPages = ref(new Set<number>())
 const searchQuery = ref('')
 const expandedTables = ref(new Set<string>())
