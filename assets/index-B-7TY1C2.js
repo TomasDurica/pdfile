@@ -1,1 +1,0 @@
-import{c as r,o as s}from"./index-pFT_u4FB.js";const _=(e,t)=>{const c=e.__vccOpts||e;for(const[o,n]of t)c[o]=n;return c},a={},l={class:"flex-1 grid place-items-center"};function f(e,t){return s(),r("div",l," Hello ")}const d=_(a,[["render",f]]);export{d as default};
